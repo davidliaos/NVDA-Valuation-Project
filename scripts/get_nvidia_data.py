@@ -8,21 +8,21 @@ import yfinance as yf
 # Load environment variables (like API key) from a .env file
 load_dotenv()
 
-# Constants
+#Constants
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
-SYMBOL = "NVDA"  # Our primary company
-BASE_OUTPUT_FOLDER = "data"
+SYMBOL = "NVDA" # Our primary company
+BASE_OUTPUT_FOLDER = "data" # Main data directory
 
-# Ticker specific info
+#Ticker specific info
 SYMBOL_OUTPUT_FOLDER = os.path.join(BASE_OUTPUT_FOLDER, SYMBOL)
 if not os.path.exists(SYMBOL_OUTPUT_FOLDER):
     os.makedirs(SYMBOL_OUTPUT_FOLDER)
 
-# Constants for Retry Logic
+#Constants for Retry Logic
 MAX_RETRIES = 5
-RETRY_DELAY_ALPHA_VANTAGE = 15
-RETRY_DELAY_YFINANCE = 5
-LONG_API_LIMIT_WAIT = 65
+RETRY_DELAY_ALPHA_VANTAGE = 15 
+RETRY_DELAY_YFINANCE = 5     
+LONG_API_LIMIT_WAIT = 65     
 
 def fetch_alpha_vantage_data(function, symbol, max_retries=MAX_RETRIES):
     """
@@ -42,12 +42,13 @@ def fetch_alpha_vantage_data(function, symbol, max_retries=MAX_RETRIES):
                 print(f"API Error for {function} ({symbol}): {data['Error Message']}")
                 retries += 1
                 time.sleep(RETRY_DELAY_ALPHA_VANTAGE)
-                continue 
+                continue # Try again after delay
             if "Note" in data:
                 print(f"API Note for {function}: {data['Note']}")
                 print(f"Likely hit API rate limit. Waiting {LONG_API_LIMIT_WAIT} seconds and retrying...")
                 time.sleep(LONG_API_LIMIT_WAIT)
-                continue
+                # Don't increment retries here, as it's a rate limit, not a 'bad' request
+                continue 
             return data
         except requests.exceptions.RequestException as e:
             print(f"Request failed for {function} ({symbol}): {e}")
@@ -71,7 +72,7 @@ def save_financial_data(data, filename_suffix, entry_key, symbol, output_folder,
                 df['fiscalDateEnding'] = pd.to_datetime(df['fiscalDateEnding'])
             df.to_csv(filepath, index=False)
             print(f"Saved {filepath}")
-            return True
+            return True 
         except Exception as e:
             print(f"Error saving {filepath} (Attempt {retries + 1}/{max_retries}): {e}")
             retries += 1
@@ -94,7 +95,7 @@ def fetch_yfinance_stock_data(symbol, output_folder, period="max", max_retries=M
                 df.index.name = "Date"
                 df.to_csv(filepath, index=True)
                 print(f"Saved {filepath}")
-                return True
+                return True 
             else:
                 print(f"No data fetched for {symbol} with period {period} from yfinance (empty DataFrame).")
                 retries += 1
@@ -125,7 +126,7 @@ def fetch_yfinance_analyst_data(symbol, output_folder, max_retries=MAX_RETRIES):
             else:
                 print(f"No recommendations found for {symbol}.")
 
-            # Basic Stock Info
+            #Basic Stock Info
             info = ticker.info
             analyst_info = {}
             if 'targetHighPrice' in info:
@@ -144,7 +145,7 @@ def fetch_yfinance_analyst_data(symbol, output_folder, max_retries=MAX_RETRIES):
             else:
                 print(f"No analyst target price info found for {symbol}.")
                 
-            # Earnings and Revenue Growth Estimates
+            #Earnings and Revenue Growth Estimates
             analyst_estimates_data = {}
             if 'earningsQuarterlyGrowth' in info:
                 analyst_estimates_data['Earnings Quarterly Growth'] = info['earningsQuarterlyGrowth']
@@ -170,42 +171,30 @@ def fetch_yfinance_analyst_data(symbol, output_folder, max_retries=MAX_RETRIES):
     print(f"Failed to fetch yfinance analyst data for {symbol} after {max_retries} attempts.")
     return False
 
-# Main execution for NVDA
+#Main execution for NVDA
 def main_nvda():
     print(f"Starting data acquisition for {SYMBOL}...")
 
-    # Define all the Alpha Vantage functions we need to call
-    alpha_vantage_functions = [
-        ("INCOME_STATEMENT", "income_statement"),
-        ("BALANCE_SHEET", "balance_sheet"), 
-        ("CASH_FLOW", "cash_flow")
-    ]
-
-    # Report types for each function
-    report_types = {
-        "annual": "annualReports",
-        "quarterly": "quarterlyReports"
+    # Alpha Vantage fetches with retry
+    data_functions = {
+        "INCOME_STATEMENT": {"annual": "annualReports", "quarterly": "quarterlyReports"},
+        "BALANCE_SHEET": {"annual": "annualReports", "quarterly": "quarterlyReports"},
+        "CASH_FLOW": {"annual": "annualReports", "quarterly": "quarterlyReports"}
     }
 
-    # Fetch data for each function separately
-    for func_name, file_prefix in alpha_vantage_functions:
-        print(f"\n--- Fetching {func_name} data ---")
+    for func_name, reports in data_functions.items():
         data = fetch_alpha_vantage_data(func_name, SYMBOL)
+        if data: # Only try to save if data was fetched
+            save_financial_data(data, "income_statement_annual", reports["annual"], SYMBOL, SYMBOL_OUTPUT_FOLDER)
+            # Alpha Vantage returns both annual and quarterly in the same call, so we save from the same 'data' object
+            save_financial_data(data, "income_statement_quarterly", reports["quarterly"], SYMBOL, SYMBOL_OUTPUT_FOLDER)
+        # No time.sleep here, pause for AV are handled inside fetch_alpha_vantage_data on rate limits
         
-        if data:
-            # Save both annual and quarterly reports
-            for period, report_key in report_types.items():
-                filename_suffix = f"{file_prefix}_{period}"
-                save_financial_data(data, filename_suffix, report_key, SYMBOL, SYMBOL_OUTPUT_FOLDER)
-        
-        # Add a small delay between API calls to be aware of rate limits
-        time.sleep(2)
-
-    print(f"\n--- Fetching yFinance data ---")
+    # yfinance fetches with retry
     fetch_yfinance_stock_data(SYMBOL, SYMBOL_OUTPUT_FOLDER, period="max")
     fetch_yfinance_analyst_data(SYMBOL, SYMBOL_OUTPUT_FOLDER)
 
-    print(f"\nData acquisition complete for {SYMBOL}!")
+    print(f"Data acquisition complete for {SYMBOL}!")
 
 if __name__ == "__main__":
     main_nvda()

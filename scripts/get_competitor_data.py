@@ -6,17 +6,19 @@ import time
 import yfinance as yf
 
 load_dotenv()
-# Constants 
+#Constants 
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 COMPETITOR_SYMBOLS = ["AMD", "INTC", "AVGO", "QCOM", "TSM"] # List of competitor tickers
-BASE_OUTPUT_FOLDER = "data"
+BASE_OUTPUT_FOLDER = "data" # Main data directory
 
-# Constants for Retry Logic
+#Constants for Retry Logic
 MAX_RETRIES = 5
 RETRY_DELAY_ALPHA_VANTAGE = 15 
 RETRY_DELAY_YFINANCE = 5     
 LONG_API_LIMIT_WAIT = 65    
 GLOBAL_COMP_WAIT = 60       
+
+
 
 def fetch_alpha_vantage_data(function, symbol, max_retries=MAX_RETRIES):
     """
@@ -138,7 +140,7 @@ def fetch_yfinance_analyst_data(symbol, output_folder, max_retries=MAX_RETRIES):
             else:
                 print(f"No analyst target price info found for {symbol}.")
                 
-            # Earnings and Revenue Growth Estimates
+            #Earnings and Revenue Growth Estimates
             analyst_estimates_data = {}
             if 'earningsQuarterlyGrowth' in info:
                 analyst_estimates_data['Earnings Quarterly Growth'] = info['earningsQuarterlyGrowth']
@@ -164,23 +166,10 @@ def fetch_yfinance_analyst_data(symbol, output_folder, max_retries=MAX_RETRIES):
     print(f"Failed to fetch yfinance analyst data for {symbol} after {max_retries} attempts.")
     return False
 
-# Main execution for competitor data
+
+#Main execution for competitor data
 def main_competitors():
     print("Starting data acquisition for competitors...")
-    
-    # Define all the Alpha Vantage functions we need to call for each competitor
-    alpha_vantage_functions = [
-        ("INCOME_STATEMENT", "income_statement"),
-        ("BALANCE_SHEET", "balance_sheet"), 
-        ("CASH_FLOW", "cash_flow")
-    ]
-    
-    # Report types for each function
-    report_types = {
-        "annual": "annualReports",
-        "quarterly": "quarterlyReports"
-    }
-    
     for symbol in COMPETITOR_SYMBOLS:
         print(f"\n--- Processing {symbol} ---")
         
@@ -189,33 +178,30 @@ def main_competitors():
         if not os.path.exists(current_symbol_output_folder):
             os.makedirs(current_symbol_output_folder)
 
-        # Fetch data for each Alpha Vantage function separately
-        for func_name, file_prefix in alpha_vantage_functions:
-            print(f"Fetching {func_name} for {symbol}...")
-            data = fetch_alpha_vantage_data(func_name, symbol)
-            
-            if data:
-                # Save both annual and quarterly reports
-                for period, report_key in report_types.items():
-                    filename_suffix = f"{file_prefix}_{period}"
-                    save_financial_data(data, filename_suffix, report_key, symbol, current_symbol_output_folder)
-            
-            # Add a small delay between API calls to be careful of rate limits
-            if func_name != alpha_vantage_functions[-1][0]:  
-                time.sleep(2)
+        # Alpha Vantage fetches with retry
+        data_functions = {
+            "INCOME_STATEMENT": {"annual": "annualReports", "quarterly": "quarterlyReports"},
+            "BALANCE_SHEET": {"annual": "annualReports", "quarterly": "quarterlyReports"},
+            "CASH_FLOW": {"annual": "annualReports", "quarterly": "quarterlyReports"}
+        }
 
+        for func_name, reports in data_functions.items():
+            data = fetch_alpha_vantage_data(func_name, symbol)
+            if data:
+                save_financial_data(data, "income_statement_annual", reports["annual"], symbol, current_symbol_output_folder)
+                save_financial_data(data, "income_statement_quarterly", reports["quarterly"], symbol, current_symbol_output_folder)
+            
+            # A short pause between different statements
+            time.sleep(RETRY_DELAY_ALPHA_VANTAGE / 2) 
+        
+        # yfinance fetches with retry
         fetch_yfinance_stock_data(symbol, current_symbol_output_folder, period="max")
         fetch_yfinance_analyst_data(symbol, current_symbol_output_folder)
         
         print(f"--- Finished {symbol} ---\n")
-        
-        # Long pause before starting next competitor (unless it's the last one)
-        if symbol != COMPETITOR_SYMBOLS[-1]:
-            print(f"Waiting {GLOBAL_COMP_WAIT} seconds before processing next competitor...")
-            time.sleep(GLOBAL_COMP_WAIT)
+        time.sleep(GLOBAL_COMP_WAIT) # Long pause before starting next competitor
 
     print("Competitor data acquisition complete!")
 
 if __name__ == "__main__":
     main_competitors()
-    
